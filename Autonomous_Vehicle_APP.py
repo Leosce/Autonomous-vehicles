@@ -26,7 +26,7 @@ class CombinedYOLODetector:
             "KITTI.pt": "KITTI",
             "light.pt": "Light Detection",
             "pothole.pt": "Pothole Detection",
-            "sign.pt": "Sign Detection"
+            #"sign.pt": "Sign Detection"
         }
         
         # Load all models
@@ -475,23 +475,12 @@ def main():
         """)
 
 if __name__ == "__main__":
-    # Check for models directory
-    if not os.path.exists("models"):
-        st.error("Models directory not found. Creating 'models' directory...")
-        try:
-            os.makedirs("models")
-            st.error("Please place the model files (KITTI.pt, light.pt, pothole.pt, sign.pt) in the 'models' directory and restart the application.")
-            sys.exit(1)
-        except Exception as e:
-            st.error(f"Failed to create models directory: {e}")
-            sys.exit(1)
-            
     # Check for required model files
     required_models = ["KITTI.pt", "light.pt", "pothole.pt"]
     missing_models = []
     
     for model_file in required_models:
-        if not os.path.exists(os.path(model_file)):
+        if not os.path.exists(model_file):
             missing_models.append(model_file)
     
     if missing_models:
