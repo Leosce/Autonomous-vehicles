@@ -475,7 +475,7 @@ def main():
 
 if __name__ == "__main__":
     # Check for required model files
-    required_models = ["KITTI.pt", "light.pt", "pothole.pt", "sign.pt"]
+    required_models = ["KITTI.pt", "light.pt", "pothole.pt"]
     missing_models = []
     
     for model_file in required_models:
