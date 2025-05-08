@@ -55,7 +55,7 @@ class CombinedYOLODetector:
         Run all models on a single frame and combine detections
         
         Args:
-            frame (numpy.ndarray): Input frame
+            frame (numpy.ndarray): Input frame (expected in BGR format for OpenCV)
             conf_threshold (float): Confidence threshold for detections
             iou_threshold (float): IOU threshold for NMS
             
@@ -72,7 +72,9 @@ class CombinedYOLODetector:
         # Process frame with each model
         for i, model in enumerate(self.models):
             model_name = self.model_names[i]
-            results = model(frame, conf=conf_threshold, iou=iou_threshold)[0]
+            # Convert BGR to RGB for YOLO (which expects RGB)
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = model(rgb_frame, conf=conf_threshold, iou=iou_threshold)[0]
             
             # Extract detections
             boxes = results.boxes.cpu().numpy()
@@ -91,7 +93,7 @@ class CombinedYOLODetector:
                         'model': model_name
                     })
                     
-                    # Draw bounding box on the frame
+                    # Draw bounding box on the frame (which is in BGR)
                     color = self._get_color(model_name)
                     cv2.rectangle(drawn_frame, (x1, y1), (x2, y2), color, 2)
                     
@@ -149,27 +151,23 @@ class CombinedYOLODetector:
         Returns:
             tuple: (processed image in RGB, results dictionary)
         """
-        # Convert PIL Image to numpy array (which is in RGB)
+        # Convert PIL Image to OpenCV format if needed
         if isinstance(image, Image.Image):
-            image_rgb = np.array(image)
+            # PIL Image is in RGB format
+            image_np = np.array(image)
+            # Convert RGB to BGR for OpenCV processing
+            image_bgr = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)
         else:
-            # Ensure input is in RGB if it's already a numpy array
-            image_rgb = image
-            if len(image_rgb.shape) == 3 and image_rgb.shape[2] == 3:
-                # If image is in BGR format, convert to RGB
-                if isinstance(image_rgb[0, 0, 0], np.uint8) and image_rgb[0, 0, 2] > image_rgb[0, 0, 0]:
-                    image_rgb = cv2.cvtColor(image_rgb, cv2.COLOR_BGR2RGB)
-                
-        # Convert to BGR for OpenCV processing
-        image_bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
-        
-        # Process the image with detections (in BGR format for OpenCV compatibility)
-        processed_image_bgr, results = self.detect_on_frame(image_bgr, conf_threshold, iou_threshold)
+            # Assume numpy array is already in BGR format (OpenCV default)
+            image_bgr = image
+            
+        # Process the image with detections
+        processed_bgr, results = self.detect_on_frame(image_bgr, conf_threshold, iou_threshold)
         
         # Convert back to RGB for Streamlit display
-        processed_image_rgb = cv2.cvtColor(processed_image_bgr, cv2.COLOR_BGR2RGB)
+        processed_rgb = cv2.cvtColor(processed_bgr, cv2.COLOR_BGR2RGB)
         
-        return processed_image_rgb, results
+        return processed_rgb, results
 
     def process_video(self, input_path, conf_threshold=0.25, iou_threshold=0.45):
         """
@@ -227,13 +225,13 @@ class CombinedYOLODetector:
                 
             frame_count += 1
             
-            # Process frame with all models
+            # Process frame with all models (frame is already in BGR format from OpenCV)
             processed_frame, results = self.detect_on_frame(frame, conf_threshold, iou_threshold)
             
             # Convert to RGB for display
             processed_frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
             
-            # Write the BGR frame to the output video file
+            # Write the processed frame (in BGR) to the output video file
             out.write(processed_frame)
             
             # Update statistics
@@ -286,49 +284,54 @@ class CombinedYOLODetector:
         Returns:
             str: Path to the saved video file
         """
-        # Try to open the webcam with a more robust approach
-        st.info("Attempting to connect to camera...")
+        # Improved webcam initialization
+        # Try different backends and indices
+        cap = None
+        camera_index = 0
         
-        # First try with index 0 (most common default)
-        cap = cv2.VideoCapture(0)
+        # List of camera backends to try (in priority order)
+        backends = [
+            cv2.CAP_ANY,          # Auto-detect
+            cv2.CAP_DSHOW,        # DirectShow (Windows)
+            cv2.CAP_MSMF,         # Media Foundation (Windows)
+            cv2.CAP_V4L2,         # Video4Linux2 (Linux)
+            cv2.CAP_AVFOUNDATION  # AVFoundation (macOS)
+        ]
         
-        # If that fails, try some alternative approaches
-        if not cap.isOpened():
-            # Release the failed capture
-            cap.release()
+        # Try different backends and indices
+        for backend in backends:
+            for i in range(3):  # Try first 3 camera indices
+                try:
+                    st.info(f"Trying to open camera index {i} with backend {backend}...")
+                    cap = cv2.VideoCapture(i, backend)
+                    
+                    # Check if camera opened successfully
+                    if cap is not None and cap.isOpened():
+                        # Read a test frame to confirm it's working
+                        ret, test_frame = cap.read()
+                        if ret and test_frame is not None and test_frame.size > 0:
+                            camera_index = i
+                            st.success(f"Successfully opened camera at index {i} with backend {backend}")
+                            break
+                        else:
+                            # Camera opened but can't read frames
+                            cap.release()
+                            cap = None
+                except Exception as e:
+                    st.warning(f"Error trying camera {i} with backend {backend}: {e}")
+                    if cap is not None:
+                        cap.release()
+                        cap = None
             
-            # Try with different backend (DirectShow on Windows)
-            if os.name == 'nt':  # Windows
-                cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-                
-            # If still not working, try other indices
-            if not cap.isOpened():
-                cap.release()
-                # Try indices 1 and 2
-                for i in [1, 2]:
-                    cap = cv2.VideoCapture(i)
-                    if cap.isOpened():
-                        st.success(f"Successfully connected to camera at index {i}")
-                        break
-                    cap.release()
-        else:
-            st.success("Successfully connected to default camera")
+            # If we found a working camera, break out of backend loop
+            if cap is not None and cap.isOpened():
+                break
         
-        # Final check if we have a working camera
-        if not cap.isOpened():
-            st.error("Error: Could not connect to any camera. Please check your camera connection and permissions.")
+        if cap is None or not cap.isOpened():
+            st.error("Error: Could not open any camera. Please check your camera connection.")
             return None
-            
-        # Read a test frame to confirm camera is working
-        ret, test_frame = cap.read()
-        if not ret or test_frame is None:
-            st.error("Error: Camera connected but unable to read frames. Please check your camera.")
-            cap.release()
-            return None
-            
-        st.success("Camera is working properly and providing video frames")
         
-        # Create a temporary file for the output video
+        # Create a timestamp for the output filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_path = tempfile.NamedTemporaryFile(delete=False, suffix=f'_webcam_{timestamp}.mp4').name
         
@@ -360,26 +363,28 @@ class CombinedYOLODetector:
         recording = True
         st.info(f"Recording from camera index {camera_index}. Press 'Stop Webcam' to finish.")
         
+        last_update_time = time.time()
+        update_interval = 1.0  # Update stats every second
+        
         while cap.isOpened() and recording and not stop_button:
             ret, frame = cap.read()
             if not ret:
-                break
+                st.error("Failed to get frame from camera. Camera may be disconnected.")
+                time.sleep(1)  # Wait a bit before trying again
+                continue
             
             frame_count += 1
             
-            # Frame is already in BGR format (OpenCV default)
-            frame_bgr = frame
+            # Process frame with all models (frame is already in BGR format from OpenCV)
+            processed_frame, results = self.detect_on_frame(frame, conf_threshold, iou_threshold)
             
-            # Process frame with all models (works with BGR input)
-            processed_frame_bgr, results = self.detect_on_frame(frame_bgr, conf_threshold, iou_threshold)
+            # Convert to RGB for display
+            processed_frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
             
-            # Convert to RGB for Streamlit display
-            processed_frame_rgb = cv2.cvtColor(processed_frame_bgr, cv2.COLOR_BGR2RGB)
+            # Write the processed frame (in BGR) to the output video file
+            out.write(processed_frame)
             
-            # Write the BGR frame to the output video file (OpenCV uses BGR)
-            out.write(processed_frame_bgr)
-            
-            # Update statistics (only count the current frame)
+            # Update statistics
             frame_detection_stats = defaultdict(int)
             frame_model_stats = defaultdict(int)
             
@@ -393,21 +398,22 @@ class CombinedYOLODetector:
             # Display the frame in Streamlit
             frame_placeholder.image(processed_frame_rgb, caption='Live Detection', use_container_width=True)
             
-            # Update statistics display
-            class_stats_placeholder.write("### Current Frame Detections by Class")
-            class_stats_placeholder.write(dict(frame_detection_stats))
+            # Update statistics display periodically to reduce overhead
+            current_time = time.time()
+            if current_time - last_update_time > update_interval:
+                class_stats_placeholder.write("### Current Frame Detections by Class")
+                class_stats_placeholder.write(dict(frame_detection_stats))
+                
+                model_stats_placeholder.write("### Current Frame Detections by Model")
+                model_stats_placeholder.write(dict(frame_model_stats))
+                
+                last_update_time = current_time
             
-            model_stats_placeholder.write("### Current Frame Detections by Model")
-            model_stats_placeholder.write(dict(frame_model_stats))
-            
-            # Check if the stop button was pressed
-            stop_button = stop_button_placeholder.button("Stop Webcam", key=f"stop_webcam_{frame_count}")
+            # Check if the stop button was pressed (using unique key to prevent button state issues)
+            stop_button = stop_button_placeholder.button("Stop Webcam", key=f"stop_{current_time}")
             if stop_button:
                 recording = False
                 break
-                
-            # Add a small delay to reduce CPU usage
-            time.sleep(0.01)
         
         # Cleanup
         cap.release()
@@ -459,9 +465,6 @@ def main():
     
     st.title("Traffic Object Detection System")
     st.markdown("Detect traffic-related objects using specialized YOLO models")
-    
-    # Set page config to handle image color properly
-    st.set_option('deprecation.showPyplotGlobalUse', False)
     
     # Sidebar for configurations
     st.sidebar.header("Configuration")
@@ -516,11 +519,8 @@ def main():
                 # Process button
                 if st.button("Detect Objects"):
                     with st.spinner("Processing image..."):
-                        # Convert PIL Image to numpy array
-                        image_np = np.array(image)
-                        
                         # Process the image
-                        processed_image, results = detector.process_image(image_np, conf_threshold, iou_threshold)
+                        processed_image, results = detector.process_image(image, conf_threshold, iou_threshold)
                         
                         # Display the processed image
                         st.image(processed_image, caption="Processed Image", use_container_width=True)
@@ -540,7 +540,7 @@ def main():
                             with st.expander(f"{cls_name} ({len(detections)} detections)"):
                                 for i, det in enumerate(detections):
                                     st.write(f"Detection {i+1}: Confidence = {det['conf']:.2f}, Model = {det['model']}")
-        
+
         elif input_type == "Video":
             # Video upload and processing
             uploaded_video = st.file_uploader("Upload a video", type=["mp4", "avi", "mov"])
@@ -582,8 +582,17 @@ def main():
                         os.unlink(video_path)
         
         elif input_type == "Webcam":
+            # Add webcam device selection
+            st.info("The system will attempt to detect available webcams.")
+            
+            # Add manual camera index option
+            manual_index = st.number_input("Or specify camera index manually (0, 1, 2, etc.)", min_value=0, max_value=10, value=0)
+            
             # Webcam processing
             if st.button("Start Webcam"):
+                # Show a message about webcam access
+                st.info("Starting webcam... If it doesn't work, try a different camera index or check your webcam permissions.")
+                
                 # Process webcam feed
                 output_video_path = detector.process_webcam(conf_threshold, iou_threshold)
                 
@@ -617,6 +626,7 @@ def main():
         - Each model uses a different color for its bounding boxes.
         - The app shows both per-class and per-model statistics.
         - For webcam use, the system will automatically detect an available camera.
+        - If webcam detection fails, try specifying a camera index manually.
         - Processed content is provided in a downloadable format.
         """)
 
