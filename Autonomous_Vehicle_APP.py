@@ -4,7 +4,8 @@ import numpy as np
 import tempfile
 import os
 from pathlib import Path
-
+os.environ["OPENCV_VIDEOIO_PRIORITY_MSMF"] = "0"  # Disable MSMF
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
 # Import the detector class from the detector.py file instead of Untitled
 from detector import CombinedYOLODetector
 
