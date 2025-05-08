@@ -6,7 +6,6 @@ from collections import defaultdict
 import tempfile
 import os
 import time
-import sys
 from PIL import Image
 import io
 
@@ -26,7 +25,7 @@ class CombinedYOLODetector:
             "KITTI.pt": "KITTI",
             "light.pt": "Light Detection",
             "pothole.pt": "Pothole Detection",
-            #"sign.pt": "Sign Detection"
+            "sign.pt": "Sign Detection"
         }
         
         # Load all models
@@ -329,7 +328,7 @@ class CombinedYOLODetector:
 
 
 def main():
-    st.set_page_config(page_title="Multi-Model YOLO Detector", layout="wide")
+    st.set_page_config(page_title="Traffic Object Detection System", layout="wide")
     
     st.title("Traffic Object Detection System")
     st.markdown("Detect traffic-related objects using specialized YOLO models")
@@ -364,13 +363,12 @@ def main():
         for model_name, is_selected in selected_models.items():
             if is_selected:
                 model_file = available_models[model_name]
-                model_path = os.path.join("models", model_file)  # Assuming models are in a 'models' directory
-                model_paths.append(model_path)
+                model_paths.append(model_file)
         
         # Initialize the detector with the model paths
         detector = CombinedYOLODetector(model_paths)
-            
-            # Input type selection
+        
+        # Input type selection
         input_type = st.radio(
             "Select Input Type", 
             ["Image", "Video", "Webcam"]
@@ -450,8 +448,8 @@ def main():
                 detector.process_webcam(camera_index, conf_threshold, iou_threshold)
     else:
         st.warning("Please select at least one model from the sidebar to begin.")
-    
-                # Add instructions and info at the bottom
+        
+    # Add instructions and info at the bottom
     with st.expander("Instructions & Information"):
         st.markdown("""
         ### How to use this app:
@@ -474,9 +472,10 @@ def main():
         - For webcam use, make sure your camera is properly connected and accessible.
         """)
 
+
 if __name__ == "__main__":
     # Check for required model files
-    required_models = ["KITTI.pt", "light.pt", "pothole.pt"]
+    required_models = ["KITTI.pt", "light.pt", "pothole.pt", "sign.pt"]
     missing_models = []
     
     for model_file in required_models:
@@ -484,7 +483,7 @@ if __name__ == "__main__":
             missing_models.append(model_file)
     
     if missing_models:
-        st.error(f"The following model files are missing from the 'models' directory: {', '.join(missing_models)}")
+        st.error(f"The following model files are missing from the current directory: {', '.join(missing_models)}")
         st.error("Please add the missing model files and restart the application.")
     else:
         main()
