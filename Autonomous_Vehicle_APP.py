@@ -371,83 +371,83 @@ def main():
         detector = CombinedYOLODetector(model_paths)
             
             # Input type selection
-            input_type = st.radio(
-                "Select Input Type", 
-                ["Image", "Video", "Webcam"]
-            )
+        input_type = st.radio(
+            "Select Input Type", 
+            ["Image", "Video", "Webcam"]
+        )
+        
+        if input_type == "Image":
+            # Image upload and processing
+            uploaded_image = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
             
-            if input_type == "Image":
-                # Image upload and processing
-                uploaded_image = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
+            if uploaded_image is not None:
+                # Read and display the original image
+                image = Image.open(uploaded_image)
+                st.image(image, caption="Uploaded Image", use_column_width=True)
                 
-                if uploaded_image is not None:
-                    # Read and display the original image
-                    image = Image.open(uploaded_image)
-                    st.image(image, caption="Uploaded Image", use_column_width=True)
-                    
-                    # Process button
-                    if st.button("Detect Objects"):
-                        with st.spinner("Processing image..."):
-                            # Convert PIL Image to numpy array
-                            image_np = np.array(image)
-                            
-                            # Process the image
-                            processed_image, results = detector.process_image(image_np, conf_threshold, iou_threshold)
-                            
-                            # Display the processed image
-                            st.image(processed_image, caption="Processed Image", use_column_width=True)
-                            
-                            # Display results
-                            st.subheader("Detection Results")
-                            
-                            # Create expandable sections for each class
-                            for cls_name, detections in results.items():
-                                with st.expander(f"{cls_name} ({len(detections)} detections)"):
-                                    for i, det in enumerate(detections):
-                                        st.write(f"Detection {i+1}: Confidence = {det['conf']:.2f}, Model = {det['model']}")
+                # Process button
+                if st.button("Detect Objects"):
+                    with st.spinner("Processing image..."):
+                        # Convert PIL Image to numpy array
+                        image_np = np.array(image)
+                        
+                        # Process the image
+                        processed_image, results = detector.process_image(image_np, conf_threshold, iou_threshold)
+                        
+                        # Display the processed image
+                        st.image(processed_image, caption="Processed Image", use_column_width=True)
+                        
+                        # Display results
+                        st.subheader("Detection Results")
+                        
+                        # Create expandable sections for each class
+                        for cls_name, detections in results.items():
+                            with st.expander(f"{cls_name} ({len(detections)} detections)"):
+                                for i, det in enumerate(detections):
+                                    st.write(f"Detection {i+1}: Confidence = {det['conf']:.2f}, Model = {det['model']}")
+        
+        elif input_type == "Video":
+            # Video upload and processing
+            uploaded_video = st.file_uploader("Upload a video", type=["mp4", "avi", "mov"])
             
-            elif input_type == "Video":
-                # Video upload and processing
-                uploaded_video = st.file_uploader("Upload a video", type=["mp4", "avi", "mov"])
+            if uploaded_video is not None:
+                # Save the uploaded video to a temporary file
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as temp_file:
+                    temp_file.write(uploaded_video.read())
+                    video_path = temp_file.name
                 
-                if uploaded_video is not None:
-                    # Save the uploaded video to a temporary file
-                    with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as temp_file:
-                        temp_file.write(uploaded_video.read())
-                        video_path = temp_file.name
-                    
-                    # Process button
-                    if st.button("Process Video"):
-                        try:
-                            # Process the video
-                            with st.spinner("Processing video... This may take some time depending on the video length."):
-                                stats = detector.process_video(video_path, conf_threshold, iou_threshold)
+                # Process button
+                if st.button("Process Video"):
+                    try:
+                        # Process the video
+                        with st.spinner("Processing video... This may take some time depending on the video length."):
+                            stats = detector.process_video(video_path, conf_threshold, iou_threshold)
+                        
+                        # Display final statistics
+                        st.subheader("Detection Statistics")
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.write("### Detections by Class")
+                            st.write(stats['detections_by_class'])
+                        
+                        with col2:
+                            st.write("### Detections by Model")
+                            st.write(stats['detections_by_model'])
                             
-                            # Display final statistics
-                            st.subheader("Detection Statistics")
-                            
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                st.write("### Detections by Class")
-                                st.write(stats['detections_by_class'])
-                            
-                            with col2:
-                                st.write("### Detections by Model")
-                                st.write(stats['detections_by_model'])
-                                
-                            st.write(f"Total Frames Processed: {stats['total_frames']}")
-                            
-                        finally:
-                            # Clean up the temporary file
-                            os.unlink(video_path)
+                        st.write(f"Total Frames Processed: {stats['total_frames']}")
+                        
+                    finally:
+                        # Clean up the temporary file
+                        os.unlink(video_path)
+        
+        elif input_type == "Webcam":
+            # Webcam processing
+            camera_index = st.number_input("Camera Index", 0, 10, 0, 1)
             
-            elif input_type == "Webcam":
-                # Webcam processing
-                camera_index = st.number_input("Camera Index", 0, 10, 0, 1)
-                
-                if st.button("Start Webcam"):
-                    # Process webcam feed
-                    detector.process_webcam(camera_index, conf_threshold, iou_threshold)
+            if st.button("Start Webcam"):
+                # Process webcam feed
+                detector.process_webcam(camera_index, conf_threshold, iou_threshold)
     else:
         st.warning("Please select at least one model from the sidebar to begin.")
     
