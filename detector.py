@@ -2,7 +2,9 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 from collections import defaultdict
-
+import os
+os.environ["OPENCV_VIDEOIO_PRIORITY_MSMF"] = "0"  # Disable MSMF
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
 class CombinedYOLODetector:
     def __init__(self, model_paths):
         """
