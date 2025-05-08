@@ -273,172 +273,263 @@ class CombinedYOLODetector:
         
         return stats, output_path
 
-    def process_webcam(self, conf_threshold=0.25, iou_threshold=0.45, camera_index=0):
+    def process_webcam(self, conf_threshold=0.25, iou_threshold=0.45):
         """
-        Process webcam feed with all models for Streamlit
+        Process webcam feed with all models for Streamlit - Improved with better error handling
         
         Args:
             conf_threshold (float): Confidence threshold for detections
             iou_threshold (float): IOU threshold for NMS
-            camera_index (int): Camera device index to use
             
         Returns:
             str: Path to the saved video file
         """
-        # Create a timestamp for the output filename
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = tempfile.NamedTemporaryFile(delete=False, suffix=f'_webcam_{timestamp}.mp4').name
+        # Get the camera index from session state or user input
+        if 'camera_index' not in st.session_state:
+            st.session_state.camera_index = 0
         
-        # Session state to track webcam status
-        if 'webcam_running' not in st.session_state:
-            st.session_state.webcam_running = False
-            
-        if 'frame_placeholder' not in st.session_state:
-            st.session_state.frame_placeholder = st.empty()
-            
-        # Create placeholders for UI elements
-        status_placeholder = st.empty()
-        frame_placeholder = st.empty()
-        stats_col1, stats_col2 = st.columns(2)
-        class_stats_placeholder = stats_col1.empty()
-        model_stats_placeholder = stats_col2.empty()
+        camera_index = st.session_state.camera_index
         
-        # Add stop button
-        stop_button_col = st.empty()
+        # Display camera selection options
+        col1, col2 = st.columns(2)
+        with col1:
+            camera_index = st.number_input("Camera Index", 
+                                           min_value=0, 
+                                           max_value=10, 
+                                           value=st.session_state.camera_index,
+                                           help="Try different indices if your camera doesn't work")
         
-        # Stats for summary
-        detection_stats = defaultdict(int)
-        model_stats = defaultdict(int)
-        frame_count = 0
+        # Update session state
+        st.session_state.camera_index = camera_index
         
-        # Start the webcam
+        # Try to access the camera with multiple backends
+        cap = None
+        backends = [
+            cv2.CAP_ANY,          # Auto-detect
+            cv2.CAP_DSHOW,        # DirectShow (Windows)
+            cv2.CAP_MSMF,         # Media Foundation (Windows)
+            cv2.CAP_V4L2,         # Video4Linux2 (Linux)
+            cv2.CAP_AVFOUNDATION  # AVFoundation (macOS)
+        ]
+        
+        backend_names = {
+            cv2.CAP_ANY: "Auto-detect",
+            cv2.CAP_DSHOW: "DirectShow (Windows)",
+            cv2.CAP_MSMF: "Media Foundation (Windows)",
+            cv2.CAP_V4L2: "Video4Linux2 (Linux)",
+            cv2.CAP_AVFOUNDATION: "AVFoundation (macOS)"
+        }
+        
+        # Backend selection
+        with col2:
+            selected_backend_index = st.selectbox(
+                "Camera Backend",
+                options=list(range(len(backends))),
+                format_func=lambda x: backend_names[backends[x]],
+                help="Try different backends if your camera doesn't work"
+            )
+        
+        selected_backend = backends[selected_backend_index]
+        
+        # Attempt to open the camera
         try:
-            # Try the specified camera index first
-            cap = cv2.VideoCapture(camera_index)
+            st.info(f"Attempting to open camera {camera_index} with {backend_names[selected_backend]}...")
             
-            # If that doesn't work, try common backend options for different OS
-            if not cap.isOpened():
-                status_placeholder.warning(f"Could not open camera at index {camera_index} with default backend. Trying alternative backends...")
-                
-                backends = [
-                    cv2.CAP_DSHOW,        # DirectShow (Windows)
-                    cv2.CAP_MSMF,         # Media Foundation (Windows)
-                    cv2.CAP_V4L2,         # Video4Linux2 (Linux)
-                    cv2.CAP_AVFOUNDATION  # AVFoundation (macOS)
-                ]
-                
-                for backend in backends:
-                    try:
-                        cap = cv2.VideoCapture(camera_index, backend)
-                        if cap.isOpened():
-                            ret, test_frame = cap.read()
-                            if ret and test_frame is not None and test_frame.size > 0:
-                                status_placeholder.success(f"Successfully opened camera {camera_index} with backend {backend}")
-                                break
-                            else:
-                                cap.release()
-                    except Exception:
-                        continue
+            # Try to open the camera
+            cap = cv2.VideoCapture(camera_index, selected_backend)
             
+            # Check if camera opened successfully
             if not cap.isOpened():
-                status_placeholder.error(f"Failed to open camera at index {camera_index}. Please check your camera connection or try a different index.")
+                st.error(f"Failed to open camera with index {camera_index} using {backend_names[selected_backend]}")
+                
+                # Provide troubleshooting suggestions
+                st.markdown("""
+                ### Troubleshooting suggestions:
+                1. Make sure your webcam is properly connected
+                2. Close other applications that might be using your webcam
+                3. Try a different camera index
+                4. Try a different backend
+                5. Check browser permissions for camera access
+                """)
+                
+                # For web browsers, add specific instructions
+                if st.checkbox("Show browser-specific instructions"):
+                    st.markdown("""
+                    #### Browser Camera Access Instructions:
+                    
+                    **Chrome**:
+                    - Click the camera icon in the address bar
+                    - Select "Always allow..." for this site
+                    - Reload the page
+                    
+                    **Firefox**:
+                    - Click the camera icon in the address bar
+                    - Select "Remember this decision"
+                    - Choose "Allow"
+                    - Reload the page
+                    
+                    **Safari**:
+                    - Go to Safari > Preferences > Websites > Camera
+                    - Set permission to "Allow" for this site
+                    - Reload the page
+                    
+                    **Edge**:
+                    - Click the camera icon in the address bar
+                    - Toggle to "Allow"
+                    - Reload the page
+                    """)
+                
                 return None
-                
-            # Get video properties
-            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            fps = 20  # Fixed fps for webcam recording
             
-            # Set up video writer
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+            # Read a test frame to confirm it's working
+            ret, test_frame = cap.read()
+            if not ret or test_frame is None or test_frame.size == 0:
+                st.error("Camera opened but couldn't read frames. Try a different camera index or backend.")
+                cap.release()
+                return None
             
-            # Display a message
-            status_placeholder.info(f"Recording from camera index {camera_index}. Press 'Stop Webcam' to finish.")
+            # Success! We have a working camera
+            st.success(f"Successfully connected to camera {camera_index} with {backend_names[selected_backend]}")
             
-            # Update session state
-            st.session_state.webcam_running = True
-            
-            # Add the stop button with a consistent key
-            if stop_button_col.button("Stop Webcam", key="stop_webcam_button"):
-                st.session_state.webcam_running = False
-            
-            # Variables for stats update control
-            last_update_time = time.time()
-            update_interval = 0.5  # Update stats every half second
-            
-            # Main webcam loop
-            while st.session_state.webcam_running:
-                # Read frame
-                ret, frame = cap.read()
-                if not ret:
-                    status_placeholder.error("Failed to get frame from camera")
-                    time.sleep(0.5)
-                    continue
+            # Show live camera preview before starting detection
+            if st.button("Start Detection", key="start_detection"):
+                # Create timestamp for output filename
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                output_path = tempfile.NamedTemporaryFile(delete=False, suffix=f'_webcam_{timestamp}.mp4').name
                 
-                frame_count += 1
+                # Get video properties
+                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                fps = 20  # Fixed fps for webcam recording
                 
-                # Process frame with all models
-                processed_frame, results = self.detect_on_frame(frame, conf_threshold, iou_threshold)
+                # Set up video writer
+                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
                 
-                # Convert to RGB for display
-                processed_frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+                # Create placeholders
+                frame_placeholder = st.empty()
+                stats_col1, stats_col2 = st.columns(2)
+                class_stats_placeholder = stats_col1.empty()
+                model_stats_placeholder = stats_col2.empty()
                 
-                # Write the processed frame to output video
-                out.write(processed_frame)
+                # Stats for summary
+                detection_stats = defaultdict(int)
+                model_stats = defaultdict(int)
+                frame_count = 0
                 
-                # Update statistics
-                frame_detection_stats = defaultdict(int)
-                frame_model_stats = defaultdict(int)
+                # Create a stop button
+                stop_button_placeholder = st.empty()
+                stop_button = stop_button_placeholder.button("Stop Detection")
                 
-                for cls_name, detections in results.items():
-                    num_detections = len(detections)
-                    frame_detection_stats[cls_name] += num_detections
-                    detection_stats[cls_name] += num_detections
+                # Start recording
+                recording = True
+                st.info(f"Recording from camera index {camera_index}. Press 'Stop Detection' to finish.")
+                
+                last_update_time = time.time()
+                update_interval = 1.0  # Update stats every second
+                
+                while cap.isOpened() and recording and not stop_button:
+                    ret, frame = cap.read()
+                    if not ret:
+                        st.error("Failed to get frame from camera. Camera may be disconnected.")
+                        time.sleep(1)  # Wait a bit before trying again
+                        continue
                     
-                    for det in detections:
-                        frame_model_stats[det['model']] += 1
-                        model_stats[det['model']] += 1
-                
-                # Display the frame
-                frame_placeholder.image(processed_frame_rgb, caption=f'Live Detection (Frame {frame_count})', use_container_width=True)
-                
-                # Update statistics display periodically to reduce overhead
-                current_time = time.time()
-                if current_time - last_update_time > update_interval:
-                    class_stats_placeholder.write("### Current Frame Detections by Class")
-                    class_stats_placeholder.write(dict(frame_detection_stats))
+                    frame_count += 1
                     
-                    model_stats_placeholder.write("### Current Frame Detections by Model")
-                    model_stats_placeholder.write(dict(frame_model_stats))
+                    # Process frame with all models
+                    processed_frame, results = self.detect_on_frame(frame, conf_threshold, iou_threshold)
                     
-                    last_update_time = current_time
+                    # Convert to RGB for display
+                    processed_frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
                     
-                    # Check if stop button was pressed (only updating UI elements periodically)
-                    if stop_button_col.button("Stop Webcam", key="stop_webcam_button"):
-                        st.session_state.webcam_running = False
+                    # Write the processed frame to the output video file
+                    out.write(processed_frame)
+                    
+                    # Update statistics
+                    frame_detection_stats = defaultdict(int)
+                    frame_model_stats = defaultdict(int)
+                    
+                    for cls_name, detections in results.items():
+                        frame_detection_stats[cls_name] += len(detections)
+                        detection_stats[cls_name] += len(detections)
+                        for det in detections:
+                            frame_model_stats[det['model']] += 1
+                            model_stats[det['model']] += 1
+                    
+                    # Display the frame in Streamlit
+                    frame_placeholder.image(processed_frame_rgb, caption='Live Detection', use_container_width=True)
+                    
+                    # Update statistics display periodically
+                    current_time = time.time()
+                    if current_time - last_update_time > update_interval:
+                        class_stats_placeholder.write("### Current Frame Detections by Class")
+                        class_stats_placeholder.write(dict(frame_detection_stats))
+                        
+                        model_stats_placeholder.write("### Current Frame Detections by Model")
+                        model_stats_placeholder.write(dict(frame_model_stats))
+                        
+                        last_update_time = current_time
+                    
+                    # Check if the stop button was pressed
+                    stop_button = stop_button_placeholder.button("Stop Detection", key=f"stop_{current_time}")
+                    if stop_button:
+                        recording = False
+                        break
                 
-                # Small delay to prevent UI freezing
-                time.sleep(0.01)
+                # Cleanup
+                cap.release()
+                out.release()
                 
-            # Cleanup
-            cap.release()
-            out.release()
-            
-            # Show aggregate statistics
-            status_placeholder.success(f"Recording finished: {frame_count} frames captured")
-            
-            st.write("### Total Detections by Class")
-            st.write(dict(detection_stats))
-            
-            st.write("### Total Detections by Model")
-            st.write(dict(model_stats))
-            
-            return output_path
+                # Show aggregate statistics
+                st.write("### Total Detections by Class")
+                st.write(dict(detection_stats))
+                
+                st.write("### Total Detections by Model")
+                st.write(dict(model_stats))
+                
+                st.success(f"Recorded {frame_count} frames to video file")
+                
+                return output_path
+            else:
+                # Just show live preview until user starts detection
+                preview_placeholder = st.empty()
+                st.info("Camera preview - press 'Start Detection' when ready")
+                
+                # Show a few frames as preview
+                for _ in range(100):  # Show preview for a limited time
+                    if cap.isOpened():
+                        ret, frame = cap.read()
+                        if ret:
+                            # Convert to RGB for display
+                            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                            preview_placeholder.image(frame_rgb, caption='Camera Preview', use_container_width=True)
+                            time.sleep(0.1)
+                        else:
+                            break
+                    else:
+                        break
+                
+                cap.release()
+                st.warning("Preview ended. Press 'Start Detection' to begin object detection.")
+                return None
             
         except Exception as e:
-            status_placeholder.error(f"Error in webcam processing: {str(e)}")
+            st.error(f"Error accessing webcam: {str(e)}")
+            st.markdown("""
+            ### Troubleshooting steps:
+            1. Check if your webcam is properly connected
+            2. Make sure no other application is using your webcam
+            3. Try restarting your computer
+            4. Try a different browser or update your current browser
+            5. Check your camera drivers
+            """)
+            
+            if cap is not None:
+                cap.release()
+            
             return None
+
 
 def get_image_download_link(img, filename, text):
     """
