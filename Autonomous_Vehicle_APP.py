@@ -142,25 +142,32 @@ class CombinedYOLODetector:
         Process a single image with all models
         
         Args:
-            image (numpy.ndarray): Input image
+            image (numpy.ndarray or PIL.Image): Input image
             conf_threshold (float): Confidence threshold for detections
             iou_threshold (float): IOU threshold for NMS
             
         Returns:
             tuple: (processed image in RGB, results dictionary)
         """
-        # Convert PIL Image to OpenCV format if needed
+        # Convert PIL Image to numpy array (which is in RGB)
         if isinstance(image, Image.Image):
-            image = np.array(image)
-            # Check if we need to convert from RGB to BGR
-            if len(image.shape) == 3 and image.shape[2] == 3:
-                image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-            
-        # Process the image with detections
-        processed_image, results = self.detect_on_frame(image, conf_threshold, iou_threshold)
+            image_rgb = np.array(image)
+        else:
+            # Ensure input is in RGB if it's already a numpy array
+            image_rgb = image
+            if len(image_rgb.shape) == 3 and image_rgb.shape[2] == 3:
+                # If image is in BGR format, convert to RGB
+                if isinstance(image_rgb[0, 0, 0], np.uint8) and image_rgb[0, 0, 2] > image_rgb[0, 0, 0]:
+                    image_rgb = cv2.cvtColor(image_rgb, cv2.COLOR_BGR2RGB)
+                
+        # Convert to BGR for OpenCV processing
+        image_bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
+        
+        # Process the image with detections (in BGR format for OpenCV compatibility)
+        processed_image_bgr, results = self.detect_on_frame(image_bgr, conf_threshold, iou_threshold)
         
         # Convert back to RGB for Streamlit display
-        processed_image_rgb = cv2.cvtColor(processed_image, cv2.COLOR_BGR2RGB)
+        processed_image_rgb = cv2.cvtColor(processed_image_bgr, cv2.COLOR_BGR2RGB)
         
         return processed_image_rgb, results
 
@@ -279,23 +286,47 @@ class CombinedYOLODetector:
         Returns:
             str: Path to the saved video file
         """
-        # Try to open the webcam with different indices
-        cap = None
-        camera_index = 0
-        max_attempts = 3
+        # Try to open the webcam with a more robust approach
+        st.info("Attempting to connect to camera...")
         
-        for i in range(max_attempts):
-            cap = cv2.VideoCapture(i)
-            if cap.isOpened():
-                camera_index = i
-                st.success(f"Successfully opened camera at index {i}")
-                break
-            else:
+        # First try with index 0 (most common default)
+        cap = cv2.VideoCapture(0)
+        
+        # If that fails, try some alternative approaches
+        if not cap.isOpened():
+            # Release the failed capture
+            cap.release()
+            
+            # Try with different backend (DirectShow on Windows)
+            if os.name == 'nt':  # Windows
+                cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+                
+            # If still not working, try other indices
+            if not cap.isOpened():
                 cap.release()
+                # Try indices 1 and 2
+                for i in [1, 2]:
+                    cap = cv2.VideoCapture(i)
+                    if cap.isOpened():
+                        st.success(f"Successfully connected to camera at index {i}")
+                        break
+                    cap.release()
+        else:
+            st.success("Successfully connected to default camera")
         
-        if cap is None or not cap.isOpened():
-            st.error("Error: Could not open any camera. Please check your camera connection.")
+        # Final check if we have a working camera
+        if not cap.isOpened():
+            st.error("Error: Could not connect to any camera. Please check your camera connection and permissions.")
             return None
+            
+        # Read a test frame to confirm camera is working
+        ret, test_frame = cap.read()
+        if not ret or test_frame is None:
+            st.error("Error: Camera connected but unable to read frames. Please check your camera.")
+            cap.release()
+            return None
+            
+        st.success("Camera is working properly and providing video frames")
         
         # Create a temporary file for the output video
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -336,14 +367,17 @@ class CombinedYOLODetector:
             
             frame_count += 1
             
-            # Process frame with all models
-            processed_frame, results = self.detect_on_frame(frame, conf_threshold, iou_threshold)
+            # Frame is already in BGR format (OpenCV default)
+            frame_bgr = frame
             
-            # Convert to RGB for display
-            processed_frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+            # Process frame with all models (works with BGR input)
+            processed_frame_bgr, results = self.detect_on_frame(frame_bgr, conf_threshold, iou_threshold)
             
-            # Write the BGR frame to the output video file
-            out.write(processed_frame)
+            # Convert to RGB for Streamlit display
+            processed_frame_rgb = cv2.cvtColor(processed_frame_bgr, cv2.COLOR_BGR2RGB)
+            
+            # Write the BGR frame to the output video file (OpenCV uses BGR)
+            out.write(processed_frame_bgr)
             
             # Update statistics (only count the current frame)
             frame_detection_stats = defaultdict(int)
@@ -425,6 +459,9 @@ def main():
     
     st.title("Traffic Object Detection System")
     st.markdown("Detect traffic-related objects using specialized YOLO models")
+    
+    # Set page config to handle image color properly
+    st.set_option('deprecation.showPyplotGlobalUse', False)
     
     # Sidebar for configurations
     st.sidebar.header("Configuration")
