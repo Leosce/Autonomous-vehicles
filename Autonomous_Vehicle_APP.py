@@ -220,7 +220,7 @@ class CombinedYOLODetector:
                     model_stats[det['model']] += 1
             
             # Display the frame in Streamlit
-            frame_placeholder.image(processed_frame_rgb, caption='Processed Frame', use_column_width=True)
+            frame_placeholder.image(processed_frame_rgb, caption='Processed Frame', use_container_width=True)
             
             # Update progress bar and stats display
             progress = min(frame_count / total_frames, 1.0) if total_frames > 0 else 0
@@ -300,7 +300,7 @@ class CombinedYOLODetector:
                     model_stats[det['model']] += 1
             
             # Display the frame in Streamlit
-            frame_placeholder.image(processed_frame_rgb, caption='Live Detection', use_column_width=True)
+            frame_placeholder.image(processed_frame_rgb, caption='Live Detection', use_container_width=True)
             
             # Update statistics display
             class_stats_placeholder.write("### Current Frame Detections by Class")
@@ -381,7 +381,7 @@ def main():
             if uploaded_image is not None:
                 # Read and display the original image
                 image = Image.open(uploaded_image)
-                st.image(image, caption="Uploaded Image", use_column_width=True)
+                st.image(image, caption="Uploaded Image", use_container_width=True)
                 
                 # Process button
                 if st.button("Detect Objects"):
@@ -393,7 +393,7 @@ def main():
                         processed_image, results = detector.process_image(image_np, conf_threshold, iou_threshold)
                         
                         # Display the processed image
-                        st.image(processed_image, caption="Processed Image", use_column_width=True)
+                        st.image(processed_image, caption="Processed Image", use_container_width=True)
                         
                         # Display results
                         st.subheader("Detection Results")
