@@ -2,7 +2,6 @@ streamlit
 opencv-python-headless
 numpy
 tempfile
-os
 pathlib
 ultralytics
 collections
