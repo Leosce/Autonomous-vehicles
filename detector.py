@@ -1,10 +1,14 @@
 import cv2
 import numpy as np
+import os
 from ultralytics import YOLO
 from collections import defaultdict
-import os
+
+# Add these environment variables at the top of the file
+# These help with headless environments
 os.environ["OPENCV_VIDEOIO_PRIORITY_MSMF"] = "0"  # Disable MSMF
-os.environ["QT_QPA_PLATFORM"] = "offscreen"
+os.environ["QT_QPA_PLATFORM"] = "offscreen"  # Use offscreen rendering
+
 class CombinedYOLODetector:
     def __init__(self, model_paths):
         """
@@ -159,38 +163,41 @@ class CombinedYOLODetector:
         detection_stats = defaultdict(int)
         model_stats = defaultdict(int)
         
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                break
-                
-            frame_count += 1
-            
-            # Process frame with all models
-            processed_frame, results = self.detect_on_frame(frame, conf_threshold, iou_threshold)
-            
-            # Update statistics
-            for cls_name, detections in results.items():
-                detection_stats[cls_name] += len(detections)
-                for det in detections:
-                    model_stats[det['model']] += 1
-            
-            # Display frame if requested
-            if show_live:
-                cv2.imshow('Combined YOLO Detection', processed_frame)
-                if cv2.waitKey(1) & 0xFF == ord('q'):
+        try:
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret:
                     break
-            
-            # Save frame if requested
+                    
+                frame_count += 1
+                
+                # Process frame with all models
+                processed_frame, results = self.detect_on_frame(frame, conf_threshold, iou_threshold)
+                
+                # Update statistics
+                for cls_name, detections in results.items():
+                    detection_stats[cls_name] += len(detections)
+                    for det in detections:
+                        model_stats[det['model']] += 1
+                
+                # Display frame if requested - modified to avoid GUI issues in headless environments
+                if show_live and 'DISPLAY' in os.environ:
+                    cv2.imshow('Combined YOLO Detection', processed_frame)
+                    if cv2.waitKey(1) & 0xFF == ord('q'):
+                        break
+                
+                # Save frame if requested
+                if writer is not None:
+                    writer.write(processed_frame)
+        except Exception as e:
+            print(f"Error processing video: {e}")
+        finally:
+            # Cleanup
+            cap.release()
             if writer is not None:
-                writer.write(processed_frame)
-        
-        # Cleanup
-        cap.release()
-        if writer is not None:
-            writer.release()
-        if show_live:
-            cv2.destroyAllWindows()
+                writer.release()
+            if show_live and 'DISPLAY' in os.environ:
+                cv2.destroyAllWindows()
         
         # Prepare and return statistics
         stats = {
