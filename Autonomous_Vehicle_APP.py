@@ -282,120 +282,81 @@ class CombinedYOLODetector:
             iou_threshold (float): IOU threshold for NMS
             
         Returns:
-            str: Path to the saved video file or None if failed
+            None: Displays live feed directly
         """
-        # Try different camera indices and backends
-        camera_indices = [0, 1, 2]  # Try common camera indices
-        backends = [
-            cv2.CAP_ANY,          # Auto-detect
-            cv2.CAP_DSHOW,        # DirectShow (Windows)
-            cv2.CAP_V4L2,         # Video4Linux (Linux)
-            cv2.CAP_MSMF,         # Microsoft Media Foundation (Windows)
-            cv2.CAP_AVFOUNDATION # AVFoundation (macOS)
-        ]
-        
-        cap = None
-        for backend in backends:
-            for index in camera_indices:
-                try:
-                    cap = cv2.VideoCapture(index, backend)
-                    if cap.isOpened():
-                        # Test if we can actually read a frame
-                        ret, frame = cap.read()
-                        if ret and frame is not None:
-                            st.success(f"Successfully opened camera at index {index} with backend {backend}")
-                            break
-                        else:
-                            cap.release()
-                            cap = None
-                    else:
-                        cap = None
-                except:
-                    cap = None
-                
-                if cap is not None and cap.isOpened():
-                    break
-            if cap is not None and cap.isOpened():
-                break
-        
-        if cap is None or not cap.isOpened():
-            st.error("""
-            Could not open any webcam. Please check:
-            1. Your camera is properly connected
-            2. You have granted camera permissions
-            3. Try a different browser (Chrome/Firefox work best)
-            4. On Linux, you might need to install v4l-utils: `sudo apt install v4l-utils`
-            """)
+        # Simplified webcam initialization
+        cap = cv2.VideoCapture(0)  # Try default camera first
+        if not cap.isOpened():
+            st.error("Error: Could not open webcam. Please check your camera connection.")
             return None
-    
-        # Set up video writer
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = tempfile.NamedTemporaryFile(delete=False, suffix=f'_webcam_{timestamp}.mp4').name
         
-        # Get camera properties
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        fps = cap.get(cv2.CAP_PROP_FPS) or 20  # Default to 20 FPS if not available
-        
-        # Create video writer
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
-        
-        # Create UI elements
+        # Create placeholders
         frame_placeholder = st.empty()
-        stop_button = st.button("Stop Webcam")
+        stats_col1, stats_col2 = st.columns(2)
+        class_stats_placeholder = stats_col1.empty()
+        model_stats_placeholder = stats_col2.empty()
         
-        # Stats tracking
+        # Stats for summary
         detection_stats = defaultdict(int)
         model_stats = defaultdict(int)
         frame_count = 0
         
-        st.info("Webcam is running. Press 'Stop Webcam' to finish.")
+        # Create a stop button
+        stop_button = st.button("Stop Webcam")
+        
+        # Start recording
+        st.info("Webcam is active. Press 'Stop Webcam' to finish.")
         
         while cap.isOpened() and not stop_button:
             ret, frame = cap.read()
             if not ret:
-                st.warning("Couldn't read frame from webcam")
-                time.sleep(0.1)
+                st.warning("Failed to get frame from camera. Trying to reconnect...")
+                time.sleep(1)
+                cap.release()
+                cap = cv2.VideoCapture(0)
                 continue
             
             frame_count += 1
             
-            # Process and display frame
+            # Process frame with all models
             processed_frame, results = self.detect_on_frame(frame, conf_threshold, iou_threshold)
+            
+            # Convert to RGB for display
             processed_frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+            
+            # Display the frame in Streamlit
             frame_placeholder.image(processed_frame_rgb, caption='Live Detection', use_container_width=True)
             
-            # Save frame to video
-            out.write(processed_frame)
+            # Update statistics
+            frame_detection_stats = defaultdict(int)
+            frame_model_stats = defaultdict(int)
             
-            # Update stats
             for cls_name, detections in results.items():
+                frame_detection_stats[cls_name] += len(detections)
                 detection_stats[cls_name] += len(detections)
                 for det in detections:
+                    frame_model_stats[det['model']] += 1
                     model_stats[det['model']] += 1
             
-            # Check if stop button was pressed (need to recreate button to check new state)
-            stop_button = st.button("Stop Webcam", key=f"stop_{frame_count}")
-        
-        # Clean up
-        cap.release()
-        out.release()
-        
-        if frame_count > 0:
-            st.success(f"Recorded {frame_count} frames")
-            st.write("### Detection Statistics")
-            col1, col2 = st.columns(2)
-            with col1:
-                st.write("By Class:", dict(detection_stats))
-            with col2:
-                st.write("By Model:", dict(model_stats))
+            # Update statistics display
+            class_stats_placeholder.write("### Current Frame Detections by Class")
+            class_stats_placeholder.write(dict(frame_detection_stats))
             
-            return output_path
-        else:
-            st.warning("No frames were recorded")
-            return None
-
+            model_stats_placeholder.write("### Current Frame Detections by Model")
+            model_stats_placeholder.write(dict(frame_model_stats))
+        
+        # Cleanup
+        cap.release()
+        
+        # Show aggregate statistics
+        st.write("### Total Detections by Class")
+        st.write(dict(detection_stats))
+        
+        st.write("### Total Detections by Model")
+        st.write(dict(model_stats))
+        
+        st.success(f"Processed {frame_count} frames from webcam")
+        
 def get_image_download_link(img, filename, text):
     """
     Generate a download link for an image
