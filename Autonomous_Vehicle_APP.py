@@ -284,51 +284,11 @@ class CombinedYOLODetector:
         Returns:
             str: Path to the saved video file
         """
-        # Improved webcam initialization
-        # Try different backends and indices
-        cap = None
-        camera_index = 0
+        # Try to open the default camera (index 0)
+        cap = cv2.VideoCapture(0)
         
-        # List of camera backends to try (in priority order)
-        backends = [
-            cv2.CAP_ANY,          # Auto-detect
-            cv2.CAP_DSHOW,        # DirectShow (Windows)
-            cv2.CAP_MSMF,         # Media Foundation (Windows)
-            cv2.CAP_V4L2,         # Video4Linux2 (Linux)
-            cv2.CAP_AVFOUNDATION  # AVFoundation (macOS)
-        ]
-        
-        # Try different backends and indices
-        for backend in backends:
-            for i in range(3):  # Try first 3 camera indices
-                try:
-                    st.info(f"Trying to open camera index {i} with backend {backend}...")
-                    cap = cv2.VideoCapture(i, backend)
-                    
-                    # Check if camera opened successfully
-                    if cap is not None and cap.isOpened():
-                        # Read a test frame to confirm it's working
-                        ret, test_frame = cap.read()
-                        if ret and test_frame is not None and test_frame.size > 0:
-                            camera_index = i
-                            st.success(f"Successfully opened camera at index {i} with backend {backend}")
-                            break
-                        else:
-                            # Camera opened but can't read frames
-                            cap.release()
-                            cap = None
-                except Exception as e:
-                    st.warning(f"Error trying camera {i} with backend {backend}: {e}")
-                    if cap is not None:
-                        cap.release()
-                        cap = None
-            
-            # If we found a working camera, break out of backend loop
-            if cap is not None and cap.isOpened():
-                break
-        
-        if cap is None or not cap.isOpened():
-            st.error("Error: Could not open any camera. Please check your camera connection.")
+        if not cap.isOpened():
+            st.error("Error: Could not open webcam. Please check your camera connection.")
             return None
         
         # Create a timestamp for the output filename
@@ -346,9 +306,7 @@ class CombinedYOLODetector:
         
         # Create placeholders
         frame_placeholder = st.empty()
-        stats_col1, stats_col2 = st.columns(2)
-        class_stats_placeholder = stats_col1.empty()
-        model_stats_placeholder = stats_col2.empty()
+        stop_button_pressed = False
         
         # Stats for summary
         detection_stats = defaultdict(int)
@@ -356,22 +314,16 @@ class CombinedYOLODetector:
         frame_count = 0
         
         # Create a stop button
-        stop_button_placeholder = st.empty()
-        stop_button = stop_button_placeholder.button("Stop Webcam")
+        if st.button("Stop Webcam"):
+            stop_button_pressed = True
         
-        # Start recording
-        recording = True
-        st.info(f"Recording from camera index {camera_index}. Press 'Stop Webcam' to finish.")
+        st.info("Webcam is running. Press 'Stop Webcam' to finish.")
         
-        last_update_time = time.time()
-        update_interval = 1.0  # Update stats every second
-        
-        while cap.isOpened() and recording and not stop_button:
+        while cap.isOpened() and not stop_button_pressed:
             ret, frame = cap.read()
             if not ret:
-                st.error("Failed to get frame from camera. Camera may be disconnected.")
-                time.sleep(1)  # Wait a bit before trying again
-                continue
+                st.error("Failed to get frame from webcam.")
+                break
             
             frame_count += 1
             
@@ -385,50 +337,36 @@ class CombinedYOLODetector:
             out.write(processed_frame)
             
             # Update statistics
-            frame_detection_stats = defaultdict(int)
-            frame_model_stats = defaultdict(int)
-            
             for cls_name, detections in results.items():
-                frame_detection_stats[cls_name] += len(detections)
                 detection_stats[cls_name] += len(detections)
                 for det in detections:
-                    frame_model_stats[det['model']] += 1
                     model_stats[det['model']] += 1
             
             # Display the frame in Streamlit
             frame_placeholder.image(processed_frame_rgb, caption='Live Detection', use_container_width=True)
             
-            # Update statistics display periodically to reduce overhead
-            current_time = time.time()
-            if current_time - last_update_time > update_interval:
-                class_stats_placeholder.write("### Current Frame Detections by Class")
-                class_stats_placeholder.write(dict(frame_detection_stats))
-                
-                model_stats_placeholder.write("### Current Frame Detections by Model")
-                model_stats_placeholder.write(dict(frame_model_stats))
-                
-                last_update_time = current_time
-            
-            # Check if the stop button was pressed (using unique key to prevent button state issues)
-            stop_button = stop_button_placeholder.button("Stop Webcam", key=f"stop_{current_time}")
-            if stop_button:
-                recording = False
+            # Check if the stop button was pressed (need to check the button state again)
+            if st.button("Stop Webcam", key=f"stop_{frame_count}"):
+                stop_button_pressed = True
                 break
         
         # Cleanup
         cap.release()
         out.release()
         
-        # Show aggregate statistics
-        st.write("### Total Detections by Class")
-        st.write(dict(detection_stats))
+        if frame_count > 0:
+            # Show aggregate statistics
+            st.write("### Total Detections by Class")
+            st.write(dict(detection_stats))
+            
+            st.write("### Total Detections by Model")
+            st.write(dict(model_stats))
+            
+            st.success(f"Recorded {frame_count} frames to video file")
+        else:
+            st.warning("No frames were recorded from the webcam.")
         
-        st.write("### Total Detections by Model")
-        st.write(dict(model_stats))
-        
-        st.success(f"Recorded {frame_count} frames to video file")
-        
-        return output_path
+        return output_path if frame_count > 0 else None
 
 
 def get_image_download_link(img, filename, text):
