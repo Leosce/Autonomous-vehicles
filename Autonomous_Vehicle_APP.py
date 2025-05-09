@@ -408,9 +408,10 @@ def process_webcam_with_webrtc(detector, conf_threshold=0.25, iou_threshold=0.45
     )
     
     # Start WebRTC streamer
+    # Fix: Pass the string directly instead of using WebRtcMode.SENDRECV
     webrtc_ctx = webrtc_streamer(
         key="yolo-detector",
-        mode=WebRtcMode.SENDRECV,
+        mode="sendrecv",  # Fixed: Use string directly instead of WebRtcMode.SENDRECV
         rtc_configuration=rtc_configuration,
         video_processor_factory=lambda: video_processor,
         media_stream_constraints={"video": True, "audio": False},
@@ -645,11 +646,12 @@ def main():
         """)
 
 
-# Fix missing WebRtcMode class
-class WebRtcMode:
-    RECVONLY = "recvonly"
-    SENDONLY = "sendonly"
-    SENDRECV = "sendrecv"
+# We don't need this custom WebRtcMode class anymore
+# The streamlit_webrtc library expects a string directly
+# class WebRtcMode:
+#     RECVONLY = "recvonly"
+#     SENDONLY = "sendonly"
+#     SENDRECV = "sendrecv"
 
 
 if __name__ == "__main__":
