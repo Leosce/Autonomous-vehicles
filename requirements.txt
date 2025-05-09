@@ -3,3 +3,4 @@ opencv-python-headless
 numpy
 ultralytics
 streamlit_webrtc
+torch
